@@ -47,6 +47,10 @@ class PhotoEditorControlBus {
             applyFilter: this.handleApplyFilter.bind(this),
             listFilters: this.handleListFilters.bind(this),
 
+            // SciPy filter operations
+            applySciPyFilter: this.handleApplySciPyFilter.bind(this),
+            listSciPyFilters: this.handleListSciPyFilters.bind(this),
+
             // Info operations
             getImageInfo: this.handleGetImageInfo.bind(this),
             exportState: this.handleExportState.bind(this),
@@ -324,6 +328,61 @@ class PhotoEditorControlBus {
 
     async handleListFilters() {
         return { filters: this.model.listFilters() };
+    }
+
+    // SciPy filter operations
+    async handleApplySciPyFilter(params) {
+        const { filterType, options = {} } = params;
+        if (!filterType) throw new Error('Missing parameter: filterType');
+
+        const result = this.model.applySciPyFilter(filterType, options);
+
+        // Trigger UI update
+        if (this.appComponent && this.appComponent.forceUpdate) {
+            this.appComponent.forceUpdate();
+        }
+
+        return result;
+    }
+
+    async handleListSciPyFilters() {
+        return { filters: this.model.listSciPyFilters() };
+    }
+
+    // Pillow filter operations
+    async handleApplyPillowFilter(params) {
+        const { filterType, options = {} } = params;
+        if (!filterType) throw new Error('Missing parameter: filterType');
+
+        const result = this.model.applyPillowFilter(filterType, options);
+
+        if (this.appComponent && this.appComponent.forceUpdate) {
+            this.appComponent.forceUpdate();
+        }
+
+        return result;
+    }
+
+    async handleListPillowFilters() {
+        return { filters: this.model.listPillowFilters() };
+    }
+
+    // Scikit-Image filter operations
+    async handleApplySkimageFilter(params) {
+        const { filterType, options = {} } = params;
+        if (!filterType) throw new Error('Missing parameter: filterType');
+
+        const result = this.model.applySkimageFilter(filterType, options);
+
+        if (this.appComponent && this.appComponent.forceUpdate) {
+            this.appComponent.forceUpdate();
+        }
+
+        return result;
+    }
+
+    async handleListSkimageFilters() {
+        return { filters: this.model.listSkimageFilters() };
     }
 
     // Info operations
