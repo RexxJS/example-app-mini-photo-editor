@@ -4,49 +4,57 @@
  */
 
 let pyodideHandler = null;
-let pyodideInitialized = false;
+let pyodideInitPromise = null;
 
 /**
  * Initialize PyOdide and load Pillow
  */
 async function initializePyodide() {
-  if (pyodideInitialized) return;
+  if (pyodideInitPromise) {
+    return pyodideInitPromise;
+  }
 
-  try {
-    if (typeof window !== 'undefined' && window.ADDRESS_PYODIDE_HANDLER) {
-      pyodideHandler = window.ADDRESS_PYODIDE_HANDLER;
-    } else if (typeof global !== 'undefined' && global.ADDRESS_PYODIDE_HANDLER) {
-      pyodideHandler = global.ADDRESS_PYODIDE_HANDLER;
-    } else if (typeof loadPyodide !== 'undefined') {
-      const pyodide = await loadPyodide();
-      await pyodide.loadPackage(['Pillow']);
+  pyodideInitPromise = (async () => {
+    try {
+      if (typeof window !== 'undefined' && window.ADDRESS_PYODIDE_HANDLER) {
+        pyodideHandler = window.ADDRESS_PYODIDE_HANDLER;
+      } else if (typeof global !== 'undefined' && global.ADDRESS_PYODIDE_HANDLER) {
+        pyodideHandler = global.ADDRESS_PYODIDE_HANDLER;
+      } else if (typeof loadPyodide !== 'undefined') {
+        const pyodide = await loadPyodide();
+        await pyodide.loadPackage(['Pillow', 'numpy']);
 
-      pyodideHandler = {
-        run: async (method, params) => {
-          if (params && params.code) {
-            return await pyodide.runPythonAsync(params.code);
+        pyodideHandler = {
+          run: async (method, params) => {
+            if (params && params.code) {
+              return await pyodide.runPythonAsync(params.code);
+            }
+            return await pyodide.runPythonAsync(method);
+          },
+          set_context: async (method, params) => {
+            pyodide.globals.set(params.key, params.value);
           }
-          return await pyodide.runPythonAsync(method);
-        },
-        set_context: async (method, params) => {
-          pyodide.globals.set(params.key, params.value);
-        }
-      };
-    } else {
-      throw new Error('PyOdide not available');
-    }
+        };
 
-    await runPython(`
+        // Import Pillow modules directly without going through runPython()
+        await pyodide.runPythonAsync(`
 from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+import numpy as np
 import io
 import base64
 `);
+      } else {
+        throw new Error('PyOdide not available');
+      }
 
-    pyodideInitialized = true;
-    console.log('✅ Pillow initialized via PyOdide');
-  } catch (error) {
-    throw new Error(`Failed to initialize Pillow: ${error.message}`);
-  }
+      console.log('✅ Pillow initialized via PyOdide');
+    } catch (error) {
+      pyodideInitPromise = null;
+      throw new Error(`Failed to initialize Pillow: ${error.message}`);
+    }
+  })();
+
+  return pyodideInitPromise;
 }
 
 async function runPython(code) {
@@ -290,7 +298,7 @@ pil_image = enhancer.enhance(factor_value)
 }
 
 /**
- * Auto-contrast
+ * Auto-contrast (converts RGBA to RGB if needed)
  */
 async function autoContrast(imageData, cutoff = 0) {
   const { width, height } = imageData;
@@ -298,28 +306,42 @@ async function autoContrast(imageData, cutoff = 0) {
 
   await setContext('cutoff_value', cutoff);
   await runPython(`
+# Convert RGBA to RGB if needed
+if pil_image.mode == 'RGBA':
+    rgb = Image.new('RGB', pil_image.size, (255, 255, 255))
+    rgb.paste(pil_image, mask=pil_image.split()[3])
+    pil_image = rgb
 pil_image = ImageOps.autocontrast(pil_image, cutoff=int(cutoff_value))
+# Convert back to RGBA
+pil_image = pil_image.convert('RGBA')
 `);
 
   return await pilToImageData(width, height);
 }
 
 /**
- * Equalize histogram
+ * Equalize histogram (converts RGBA to RGB if needed)
  */
 async function equalize(imageData) {
   const { width, height } = imageData;
   await imageDataToPIL(imageData);
 
   await runPython(`
+# Convert RGBA to RGB if needed
+if pil_image.mode == 'RGBA':
+    rgb = Image.new('RGB', pil_image.size, (255, 255, 255))
+    rgb.paste(pil_image, mask=pil_image.split()[3])
+    pil_image = rgb
 pil_image = ImageOps.equalize(pil_image)
+# Convert back to RGBA
+pil_image = pil_image.convert('RGBA')
 `);
 
   return await pilToImageData(width, height);
 }
 
 /**
- * Posterize (reduce colors)
+ * Posterize (reduce colors) (converts RGBA to RGB if needed)
  */
 async function posterize(imageData, bits = 4) {
   const { width, height } = imageData;
@@ -327,14 +349,21 @@ async function posterize(imageData, bits = 4) {
 
   await setContext('bits_value', bits);
   await runPython(`
+# Convert RGBA to RGB if needed
+if pil_image.mode == 'RGBA':
+    rgb = Image.new('RGB', pil_image.size, (255, 255, 255))
+    rgb.paste(pil_image, mask=pil_image.split()[3])
+    pil_image = rgb
 pil_image = ImageOps.posterize(pil_image, int(bits_value))
+# Convert back to RGBA
+pil_image = pil_image.convert('RGBA')
 `);
 
   return await pilToImageData(width, height);
 }
 
 /**
- * Solarize
+ * Solarize (converts RGBA to RGB if needed)
  */
 async function solarize(imageData, threshold = 128) {
   const { width, height } = imageData;
@@ -342,7 +371,14 @@ async function solarize(imageData, threshold = 128) {
 
   await setContext('threshold_value', threshold);
   await runPython(`
+# Convert RGBA to RGB if needed
+if pil_image.mode == 'RGBA':
+    rgb = Image.new('RGB', pil_image.size, (255, 255, 255))
+    rgb.paste(pil_image, mask=pil_image.split()[3])
+    pil_image = rgb
 pil_image = ImageOps.solarize(pil_image, threshold=int(threshold_value))
+# Convert back to RGBA
+pil_image = pil_image.convert('RGBA')
 `);
 
   return await pilToImageData(width, height);

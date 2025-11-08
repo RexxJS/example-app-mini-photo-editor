@@ -2,7 +2,7 @@
  * Playwright Browser Tests for Pillow via PyOdide
  */
 
-const { test, expect } = require('@playwright/test');
+import { test, expect } from '@playwright/test';
 
 test.describe('Pillow via PyOdide - Browser Tests', () => {
   test.setTimeout(120000);

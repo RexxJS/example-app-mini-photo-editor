@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<!--
+  RexxJS Pillow Filter Test Harness
+  Copyright Paul Hammant
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RexxJS Pillow Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #00ff00;
+        }
+        #output {
+            white-space: pre-wrap;
+            background: #000;
+            padding: 15px;
+            border: 1px solid #00ff00;
+            margin: 20px 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: monospace;
+            font-weight: bold;
+            margin: 5px;
+        }
+        button:hover {
+            background: #00cc00;
+        }
+        #canvas-preview {
+            border: 2px solid #00ff00;
+            max-width: 400px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>RexxJS Pillow Filter Test</h1>
+
+    <div>
+        <button onclick="runTest()">Run Full Test</button>
+        <button onclick="testOpenImage()">1. Open Image</button>
+        <button onclick="testApplyFilter()">2. Apply Posterize</button>
+        <button onclick="testGetCanvas()">3. Get Canvas</button>
+        <button onclick="clearOutput()">Clear Output</button>
+    </div>
+
+    <div id="output">Waiting for test...</div>
+
+    <img id="canvas-preview" style="display:none">
+
+    <script type="module">
+        window.log = function(msg) {
+            const output = document.getElementById('output');
+            output.textContent += msg + '\n';
+            output.scrollTop = output.scrollHeight;
+            console.log(msg);
+        }
+
+        window.clearOutput = function() {
+            document.getElementById('output').textContent = '';
+        }
+
+        window.sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        window.testOpenImage = async function() {
+            log('=== Opening Image ===');
+            try {
+                const result = await window.ADDRESS_PHOTOEDITOR.run('open-image', {
+                    path: '/Testcard_F.jpg'
+                });
+                log('Result: ' + result);
+            } catch(e) {
+                log('ERROR: ' + e.message);
+            }
+        }
+
+        window.testApplyFilter = async function() {
+            log('=== Applying Posterize Filter ===');
+            try {
+                // Get before pixels
+                const before = await window.ADDRESS_PHOTOEDITOR.run('get-canvas-data', { sample: 5 });
+                log('Before pixels: ' + before);
+
+                // Apply filter
+                const result = await window.ADDRESS_PHOTOEDITOR.run('apply-pillow-filter', {
+                    filter: 'posterize'
+                });
+                log('Filter result: ' + result);
+
+                // Wait a bit
+                await sleep(500);
+
+                // Get after pixels
+                const after = await window.ADDRESS_PHOTOEDITOR.run('get-canvas-data', { sample: 5 });
+                log('After pixels: ' + after);
+            } catch(e) {
+                log('ERROR: ' + e.message);
+            }
+        }
+
+        window.testGetCanvas = async function() {
+            log('=== Getting Canvas ===');
+            try {
+                const dataUrl = await window.ADDRESS_PHOTOEDITOR.run('get-canvas', {});
+                log('Data URL length: ' + dataUrl.length);
+                log('First 100 chars: ' + dataUrl.substring(0, 100));
+
+                // Show preview
+                const preview = document.getElementById('canvas-preview');
+                preview.src = dataUrl;
+                preview.style.display = 'block';
+                log('Preview updated!');
+            } catch(e) {
+                log('ERROR: ' + e.message);
+            }
+        }
+
+        window.runTest = async function() {
+            clearOutput();
+            log('=== Starting Full Test ===\n');
+
+            // Check if ADDRESS_PHOTOEDITOR is available
+            if (!window.ADDRESS_PHOTOEDITOR) {
+                log('ERROR: ADDRESS_PHOTOEDITOR not found!');
+                log('Make sure the app is loaded in an iframe or window below.');
+                return;
+            }
+
+            try {
+                // 1. Check PyOdide
+                log('1. Checking PyOdide...');
+                const status = await window.ADDRESS_PHOTOEDITOR.run('check-pyodide', {});
+                log('   Status: ' + status + '\n');
+
+                // 2. Open image
+                log('2. Opening test image...');
+                const openResult = await window.ADDRESS_PHOTOEDITOR.run('open-image', {
+                    path: '/Testcard_F.jpg'
+                });
+                log('   ' + openResult + '\n');
+
+                await sleep(2000); // Wait for image to load
+
+                // 3. Get before pixels
+                log('3. Getting canvas BEFORE filter...');
+                const before = await window.ADDRESS_PHOTOEDITOR.run('get-canvas-data', { sample: 5 });
+                log('   Before: ' + before + '\n');
+
+                // 4. Apply filter
+                log('4. Applying posterize filter...');
+                const filterResult = await window.ADDRESS_PHOTOEDITOR.run('apply-pillow-filter', {
+                    filter: 'posterize'
+                });
+                log('   ' + filterResult + '\n');
+
+                await sleep(3000); // Wait for processing
+
+                // 5. Get after pixels
+                log('5. Getting canvas AFTER filter...');
+                const after = await window.ADDRESS_PHOTOEDITOR.run('get-canvas-data', { sample: 5 });
+                log('   After: ' + after + '\n');
+
+                // 6. Get canvas as image
+                log('6. Getting canvas as base64...');
+                const dataUrl = await window.ADDRESS_PHOTOEDITOR.run('get-canvas', {});
+                log('   Data URL length: ' + dataUrl.length + '\n');
+
+                const preview = document.getElementById('canvas-preview');
+                preview.src = dataUrl;
+                preview.style.display = 'block';
+
+                // 7. Get debug log
+                log('7. Getting debug log...');
+                const debugLog = await window.ADDRESS_PHOTOEDITOR.run('get-debug-log', {});
+                log('=== Debug Log ===');
+                log(debugLog);
+
+                log('\n=== Test Complete ===');
+
+            } catch(e) {
+                log('ERROR: ' + e.message);
+                log('Stack: ' + e.stack);
+            }
+        }
+
+        // Auto-run test after a delay (if ADDRESS_PHOTOEDITOR becomes available)
+        setTimeout(() => {
+            if (window.ADDRESS_PHOTOEDITOR) {
+                log('ADDRESS_PHOTOEDITOR detected!');
+                log('Click "Run Full Test" to start.\n');
+            } else {
+                log('ERROR: ADDRESS_PHOTOEDITOR not found.');
+                log('The photo editor app may not be loaded correctly.\n');
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

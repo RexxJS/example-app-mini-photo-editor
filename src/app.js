@@ -1,3 +1,4 @@
+// Portions Copyright Paul Hammant
 
 import { html, reactive, onMount, onUnmount} from '@xdadda/mini'
 import { alert } from '@xdadda/mini/components'
@@ -7,7 +8,7 @@ import './app.css'
 import './editor.css'
 
 import miniExif from '@xdadda/mini-exif'
-import { minigl} from '@xdadda/mini-gl'
+import { minigl} from './vendored/mini-gl/minigl.js'
 import logo from './assets/icon.png'
 import github from './assets/icon_github.png'
 import icon_split from './assets/icon_split.svg?raw'
@@ -45,6 +46,7 @@ import InpaintTelea from './js/inpaint.js'
 import scipyProcessor from './rexxjs-functions/scipy-via-pyodide/scipy.js'
 import pillowProcessor from './rexxjs-functions/pillow-via-pyodide/pillow.js'
 import skimageProcessor from './rexxjs-functions/scikit-image-via-pyodide/scikit-image.js'
+import { setupRexxJSControl } from './rexxjs-control-handler.js'
 
 const initstate = {
   appname:'MiNi PhotoEditor',
@@ -221,18 +223,20 @@ export function Editor(input=false){
   ///// RUN GL PIPELINE
 
     async function updateGL(){
-      //load image's texture
+      console.log('🚀 updateGL() called')
+      // Always load base image texture first
+      console.log('📥 Loading base image')
       _minigl.loadImage()
 
       // PYTHON LIBRARY PROCESSING (SciPy, Pillow, Scikit-image)
-      const canvas = document.getElementById("canvas")
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      // These process AFTER loading the base image, replacing it with processed version
 
       // SCIPY PROCESSING
       if(params.scipy.needsProcessing && params.scipy.filterType) {
         try {
           _minigl.paintCanvas()
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = _minigl.readPixels()
+          const imageData = new ImageData(new Uint8ClampedArray(data), _minigl.width, _minigl.height)
           let processedData
 
           switch(params.scipy.filterType) {
@@ -273,10 +277,13 @@ export function Editor(input=false){
       }
 
       // PILLOW PROCESSING
-      if(params.pillow.needsProcessing && params.pillow.filterType) {
+      if(!params.pillow.$skip && params.pillow.filterType) {
+        console.log('🎨 Starting Pillow filter:', params.pillow.filterType)
         try {
           _minigl.paintCanvas()
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = _minigl.readPixels()
+          const imageData = new ImageData(new Uint8ClampedArray(data), _minigl.width, _minigl.height)
+          console.log('📸 Captured image data:', imageData.width, 'x', imageData.height, 'first pixel:', imageData.data.slice(0, 4))
           let processedData
 
           switch(params.pillow.filterType) {
@@ -311,7 +318,7 @@ export function Editor(input=false){
               processedData = await pillowProcessor.equalize(imageData)
               break
             case 'posterize':
-              processedData = await pillowProcessor.posterize(imageData, 4)
+              processedData = await pillowProcessor.posterize(imageData, 2)
               break
             case 'solarize':
               processedData = await pillowProcessor.solarize(imageData, 128)
@@ -319,20 +326,38 @@ export function Editor(input=false){
           }
 
           if(processedData) {
+            console.log('✅ Got processed data:', processedData.width, 'x', processedData.height, 'first pixel:', Array.from(processedData.data.slice(0, 4)))
+            const centerOffset = (Math.floor(processedData.height/2) * processedData.width + Math.floor(processedData.width/2)) * 4
+            console.log('✅ Got processed data - center pixel:', Array.from(processedData.data.slice(centerOffset, centerOffset + 4)))
+            console.log('🔄 About to load processed data into texture...')
+            // Load the processed ImageData into the texture
             _minigl.loadImage(processedData)
+            console.log('🖼️ Image replaced after', params.pillow.filterType)
+            // Verify texture was loaded by reading back immediately
+            _minigl.paintCanvas()
+            const verifyData = _minigl.readPixels()
+            const verifyPixels = new Uint8ClampedArray(verifyData)
+            console.log('🔍 Verification read after loadImage - first pixel:', Array.from(verifyPixels.slice(0, 4)))
+            // Also check center pixel
+            const verifyCenterOffset = (Math.floor(_minigl.height/2) * _minigl.width + Math.floor(_minigl.width/2)) * 4
+            console.log('🔍 Verification read after loadImage - center pixel:', Array.from(verifyPixels.slice(verifyCenterOffset, verifyCenterOffset + 4)))
+          } else {
+            console.log('⚠️ No processed data returned!')
           }
-          params.pillow.needsProcessing = false
         } catch(error) {
-          console.error('Pillow processing error:', error)
-          params.pillow.needsProcessing = false
+          console.log('Pillow processing error:', error)
         }
       }
 
+      console.log('✓ Pillow block complete')
+
       // SCIKIT-IMAGE PROCESSING
+      console.log('Checking scikit-image...')
       if(params.skimage.needsProcessing && params.skimage.filterType) {
         try {
           _minigl.paintCanvas()
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = _minigl.readPixels()
+          const imageData = new ImageData(new Uint8ClampedArray(data), _minigl.width, _minigl.height)
           let processedData
 
           switch(params.skimage.filterType) {
@@ -371,6 +396,7 @@ export function Editor(input=false){
           params.skimage.needsProcessing = false
         }
       }
+
 
       if(params.heal.healit){
         //INPAINT
@@ -441,11 +467,13 @@ export function Editor(input=false){
       if(!params.blender.$skip && params.blender.blendmap) _minigl.filterBlend(params.blender.blendmap,params.blender.blendmix)
 
       /////////// adjustment filters
+      console.log('🔧 Applying adjustment filters...')
       let adjparams = {}
       if(!params.lights.$skip) adjparams = {...adjparams, ...params.lights}
       if(!params.colors.$skip) adjparams = {...adjparams, ...params.colors}
       if(!params.effects.$skip) adjparams = {...adjparams, ...params.effects}
       _minigl.filterAdjustments({...adjparams})
+      console.log('✓ Adjustments applied')
 
       if(adjparams.bloom) _minigl.filterBloom(adjparams.bloom)
       if(adjparams.noise) _minigl.filterNoise(adjparams.noise)
@@ -467,7 +495,9 @@ export function Editor(input=false){
       // SciPy processing happens at the beginning of updateGL when needsProcessing is true
 
       //draw to canvas
+      console.log('🖌️ Final paint to canvas')
       _minigl.paintCanvas();
+      console.log('✨ Canvas painted')
 
       if(updateHistogram) updateHistogram()
     } 
@@ -624,8 +654,16 @@ export function Editor(input=false){
       //quick hack to close the samples window
       root.lastElementChild.remove()
     }
-  ///////////////// 
+  /////////////////
 
+  ///// REXXJS CONTROL BUS
+    // Setup ADDRESS PHOTOEDITOR handler for RexxJS scripts
+    setupRexxJSControl({
+      params,
+      openInput,
+      updateGL: async () => await updateGL()
+    })
+  /////////////////
 
   return html`
   <div class="minieditor">
